@@ -105,7 +105,6 @@ def generator(config: ConfigManager) -> tuple[list[Molecule], int]:
     if len(blocks) > 1 and config.general.verbosity > 0:
         backup_verbosity = config.general.verbosity  # Save verbosity level for later
         config.general.verbosity = 0  # Disable verbosity if parallel
-        # NOTE: basically no messages will be printed if generation is run in parallel
 
     # Set up parallel blocks environment
     with setup_managers(num_cores // MINCORES_PLACEHOLDER, num_cores) as (
@@ -114,10 +113,10 @@ def generator(config: ConfigManager) -> tuple[list[Molecule], int]:
         resources,
     ):
         # Prepare a message queue and printer thread
-        # msg_queue = Queue()
-        # stop_event = manager.Event()
-        # printer = Thread(target=printer_thread, args=(msg_queue, stop_event))
-        # printer.start()
+        msg_queue = Queue()
+        stop_event = manager.Event()
+        printer = Thread(target=printer_thread, args=(msg_queue, stop_event))
+        printer.start()
 
         # The following creates a queue of futures which occupy a certain number of cores each
         # as defined by each block
@@ -136,6 +135,7 @@ def generator(config: ConfigManager) -> tuple[list[Molecule], int]:
                         refine_engine,
                         postprocess_engine,
                         block.ncores,
+                        msg_queue,
                     )
                 )
 
@@ -183,6 +183,7 @@ def single_molecule_generator(
     refine_engine: QMMethod,
     postprocess_engine: QMMethod | None,
     ncores: int,
+    msg_queue: Queue[str],
 ) -> Molecule | None:
     """
     Generate a single molecule (from start to finish).
@@ -198,6 +199,10 @@ def single_molecule_generator(
                 + f"{config.general.num_molecules:<4} {'='*24}"
             )
             print(f"{'='*80}")
+        else:
+            msg_queue.put(
+                f"Generating molecule {molcount + 1:<4} of {config.general.num_molecules:<4}"
+            )
 
         with setup_managers(ncores, ncores) as (executor, manager, resources_local):
             stop_event = manager.Event()
@@ -241,6 +246,10 @@ def single_molecule_generator(
     if config.general.verbosity > 0:
         print(f"Optimized mindless molecule found in {cycles_needed} cycles.")
         print(optimized_molecule)
+    else:
+        msg_queue.put(
+            f"Optimized mindless molecule {molcount + 1:<4} found in {cycles_needed} cycles."
+        )
 
     return optimized_molecule
 
